@@ -1,20 +1,21 @@
 # app.py — Urban Mood Forecaster (Professional Edition)
+# Streamlit UI Frontend
 
 import os
 import base64
 import pandas as pd
-import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-import pycountry
-import pycountry_convert as pc
 import streamlit as st
-from statsmodels.tsa.arima.model import ARIMA
-from statsmodels.tsa.statespace.sarimax import SARIMAX
-from sklearn.metrics import mean_squared_error
-import warnings
-
-warnings.filterwarnings("ignore")
+from backend import (
+    load_sentiment_data,
+    get_country_data,
+    evaluate_models,
+    forecast_future,
+    recommend_by_season,
+    get_seasonal_scores,
+    get_continent_breakdown
+)
 
 # ===============================
 # PAGE SETUP
@@ -115,66 +116,12 @@ add_bg_and_font(
 
 
 # ===============================
-# DATA FUNCTIONS
+# DATA LOADING WITH CACHING
 # ===============================
 @st.cache_data
-def load_sentiment_data(data_directory):
-    df_list = []
-    csv_files = [f for f in os.listdir(data_directory) if f.endswith(".csv")]
-    for file in csv_files:
-        file_path = os.path.join(data_directory, file)
-        temp_df = pd.read_csv(file_path)
-        year = file.split("_")[-1].replace(".csv", "").replace("-1", "")
-        temp_df["year"] = int(year)
-        df_list.append(temp_df)
-    combined_df = pd.concat(df_list, ignore_index=True)
-    combined_df = combined_df.rename(columns={"NAME_0": "country"})
-    combined_df["DATE"] = pd.to_datetime(combined_df["DATE"])
-    combined_df = combined_df.sort_values(["country", "DATE"])
-    return combined_df
-
-
-def get_country_data(combined_df, country):
-    df = combined_df[combined_df["country"] == country][["DATE", "SCORE"]]
-    df = df.set_index("DATE").asfreq("D").interpolate("linear")
-    return df
-
-
-def evaluate_models(train, test):
-    results = {}
-    ar = ARIMA(train, order=(1, 0, 0)).fit()
-    results["AR(1)"] = np.sqrt(mean_squared_error(test, ar.forecast(len(test))))
-    ma = ARIMA(train, order=(0, 0, 1)).fit()
-    results["MA(1)"] = np.sqrt(mean_squared_error(test, ma.forecast(len(test))))
-    arima = ARIMA(train, order=(1, 0, 1)).fit()
-    results["ARIMA(1,0,1)"] = np.sqrt(mean_squared_error(test, arima.forecast(len(test))))
-    sarima = SARIMAX(train, order=(1, 0, 1), seasonal_order=(0, 1, 1, 7)).fit(disp=False)
-    results["SARIMA(1,0,1)(0,1,1,7)"] = np.sqrt(mean_squared_error(test, sarima.forecast(len(test))))
-    best_model = min(results, key=results.get)
-    return results, best_model
-
-
-def forecast_future(df, steps=90):
-    model = SARIMAX(df["SCORE"], order=(1, 0, 1), seasonal_order=(0, 1, 1, 7)).fit(disp=False)
-    forecast = model.get_forecast(steps=steps)
-    pred_mean = forecast.predicted_mean
-    pred_ci = forecast.conf_int()
-    future_dates = pd.date_range(df.index[-1] + pd.Timedelta(days=1), periods=steps, freq="D")
-    return future_dates, pred_mean, pred_ci
-
-
-def recommend_by_season(combined_df, season):
-    season_months = {"winter": [12, 1, 2], "spring": [3, 4, 5], "summer": [6, 7, 8], "autumn": [9, 10, 11]}
-    df = combined_df.copy()
-    df["month"] = df["DATE"].dt.month
-    top = (
-        df[df["month"].isin(season_months[season.lower()])]
-        .groupby("country")["SCORE"]
-        .mean()
-        .sort_values(ascending=False)
-        .head(15)
-    )
-    return top
+def load_data_cached(data_directory):
+    """Wrapper to cache data loading for Streamlit."""
+    return load_sentiment_data(data_directory)
 
 
 # ===============================
@@ -188,7 +135,7 @@ st.markdown(
 st.write("")
 
 data_directory = os.path.join(BASE_DIR, "dataverse_files", "Sentiment Data - Country")
-combined_df = load_sentiment_data(data_directory)
+combined_df = load_data_cached(data_directory)
 
 # --- Persistent option storage ---
 if "option" not in st.session_state:
@@ -267,19 +214,7 @@ elif st.session_state.option == "best_season":
     country = st.selectbox("Select a country:", countries)
 
     df = combined_df[combined_df["country"] == country].copy()
-    df["month"] = df["DATE"].dt.month
-
-    season_labels = {
-        "winter": [12, 1, 2],
-        "spring": [3, 4, 5],
-        "summer": [6, 7, 8],
-        "autumn": [9, 10, 11],
-    }
-
-    season_scores = {}
-    for season, months in season_labels.items():
-        season_scores[season] = df[df["month"].isin(months)]["SCORE"].mean()
-
+    season_scores = get_seasonal_scores(df)
     season_df = pd.DataFrame(list(season_scores.items()), columns=["Season", "Average Sentiment"]).sort_values(
         "Average Sentiment", ascending=False
     )
@@ -318,19 +253,7 @@ elif st.session_state.option == "happiest":
         st.success(f"Top {len(top)} happiest countries in {season.capitalize()} 🌞")
 
         if st.checkbox("Show Continent Breakdown"):
-            continent_data = []
-            for country in top.index:
-                try:
-                    match = pycountry.countries.search_fuzzy(country)[0]
-                    alpha2 = match.alpha_2
-                    continent_code = pc.country_alpha2_to_continent_code(alpha2)
-                    continent_name = {
-                        "AF": "Africa", "NA": "North America", "OC": "Oceania",
-                        "AN": "Antarctica", "AS": "Asia", "EU": "Europe", "SA": "South America",
-                    }.get(continent_code, "Unknown")
-                except Exception:
-                    continent_name = "Unknown"
-                continent_data.append((country, continent_name))
+            continent_data = get_continent_breakdown(top.index.tolist())
 
             continent_df = pd.DataFrame(continent_data, columns=["Country", "Continent"])
             st.markdown("### 🌍 Continent Breakdown")
