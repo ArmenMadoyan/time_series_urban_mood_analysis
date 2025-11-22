@@ -14,7 +14,8 @@ from backend import (
     forecast_future,
     recommend_by_season,
     get_seasonal_scores,
-    get_continent_breakdown
+    get_continent_breakdown,
+    TENSORFLOW_AVAILABLE
 )
 
 # ===============================
@@ -176,9 +177,26 @@ if st.session_state.option == "forecast":
         min_value=7, max_value=365, value=90, step=7,
         help="Choose between 7 and 365 days."
     )
+    
+    # RNN Model Options
+    col1, col2 = st.columns(2)
+    with col1:
+        include_rnn = st.checkbox(
+            "Include RNN Models (LSTM, GRU, Bidirectional LSTM)",
+            value=False,
+            help="Requires TensorFlow. May take longer to train but can provide better accuracy."
+        )
+    with col2:
+        if include_rnn:
+            if TENSORFLOW_AVAILABLE:
+                st.success("✅ TensorFlow available - RNN models will be included")
+            else:
+                st.warning("⚠️ TensorFlow not installed - RNN models will be skipped")
+                include_rnn = False
 
     if st.button("Run Forecast"):
-        results, best_model = evaluate_models(train, test)
+        with st.spinner("Training models... This may take a moment, especially with RNN models."):
+            results, best_model = evaluate_models(train, test, include_rnn=include_rnn)
         st.write("### Model RMSEs")
         st.dataframe(pd.DataFrame(list(results.items()), columns=["Model", "RMSE"]))
         st.success(f"Best Performing Model: {best_model}")
