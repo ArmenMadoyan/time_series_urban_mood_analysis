@@ -1,0 +1,358 @@
+# app.py — Urban Mood Forecaster (Professional Edition)
+
+import os
+import base64
+import pandas as pd
+import numpy as np
+import plotly.express as px
+import plotly.graph_objects as go
+import pycountry
+import pycountry_convert as pc
+import streamlit as st
+from statsmodels.tsa.arima.model import ARIMA
+from statsmodels.tsa.statespace.sarimax import SARIMAX
+from sklearn.metrics import mean_squared_error
+import warnings
+
+warnings.filterwarnings("ignore")
+
+# ===============================
+# PAGE SETUP
+# ===============================
+st.set_page_config(page_title="Urban Mood Forecaster", page_icon="🌍", layout="wide")
+
+
+# === Custom Background & Font ===
+def add_bg_and_font(bg_path, font_path):
+    """Apply local background and custom font styling."""
+    with open(bg_path, "rb") as f:
+        bg_encoded = base64.b64encode(f.read()).decode()
+    with open(font_path, "rb") as f:
+        font_encoded = base64.b64encode(f.read()).decode()
+
+    css = f"""
+    <style>
+    @font-face {{
+        font-family: 'Cityscape';
+        src: url(data:font/ttf;base64,{font_encoded}) format('truetype');
+    }}
+
+    [data-testid="stAppViewContainer"] {{
+        background-image: url("data:image/png;base64,{bg_encoded}");
+        background-size: cover;
+        background-position: center;
+        background-repeat: no-repeat;
+        background-attachment: fixed;
+    }}
+
+    [data-testid="stHeader"], [data-testid="stToolbar"] {{
+        background: rgba(0,0,0,0);
+    }}
+
+    [data-testid="stAppViewContainer"]::before {{
+        content: "";
+        position: absolute;
+        top: 0; left: 0; right: 0; bottom: 0;
+        background-color: rgba(255, 255, 255, 0.65);
+        z-index: 0;
+    }}
+
+    h1 {{
+        font-family: 'Cityscape', serif !important;
+        font-size: 120px !important;
+        letter-spacing: 3px;
+        text-align: center;
+        color: #111 !important;
+        margin-top: 80px;
+        margin-bottom: 60px;
+        text-transform: uppercase;
+    }}
+
+    h2, h3, label, p {{
+        color: #111 !important;
+    }}
+
+    .stButton>button {{
+        background: rgba(255, 255, 255, 0.9);
+        color: #000 !important;
+        font-size: 22px !important;
+        font-weight: 600;
+        border: 2px solid #000;
+        border-radius: 50px;
+        padding: 0.7rem 2rem;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+    }}
+
+    .stButton>button:hover {{
+        background: #000;
+        color: white !important;
+        transform: scale(1.05);
+    }}
+
+    div[data-testid="stHorizontalBlock"] {{
+        margin-top: 120px !important;
+    }}
+
+    .block-container {{
+        background: rgba(255,255,255,0.8);
+        border-radius: 20px;
+        padding: 1.5rem 2rem;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+    }}
+    </style>
+    """
+
+    st.markdown(css, unsafe_allow_html=True)
+
+
+# ✅ Apply local resources dynamically
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+add_bg_and_font(
+    os.path.join(BASE_DIR, "Background.png"),
+    os.path.join(BASE_DIR, "cityscape font.ttf")
+)
+
+
+# ===============================
+# DATA FUNCTIONS
+# ===============================
+@st.cache_data
+def load_sentiment_data(data_directory):
+    df_list = []
+    csv_files = [f for f in os.listdir(data_directory) if f.endswith(".csv")]
+    for file in csv_files:
+        file_path = os.path.join(data_directory, file)
+        temp_df = pd.read_csv(file_path)
+        year = file.split("_")[-1].replace(".csv", "").replace("-1", "")
+        temp_df["year"] = int(year)
+        df_list.append(temp_df)
+    combined_df = pd.concat(df_list, ignore_index=True)
+    combined_df = combined_df.rename(columns={"NAME_0": "country"})
+    combined_df["DATE"] = pd.to_datetime(combined_df["DATE"])
+    combined_df = combined_df.sort_values(["country", "DATE"])
+    return combined_df
+
+
+def get_country_data(combined_df, country):
+    df = combined_df[combined_df["country"] == country][["DATE", "SCORE"]]
+    df = df.set_index("DATE").asfreq("D").interpolate("linear")
+    return df
+
+
+def evaluate_models(train, test):
+    results = {}
+    ar = ARIMA(train, order=(1, 0, 0)).fit()
+    results["AR(1)"] = np.sqrt(mean_squared_error(test, ar.forecast(len(test))))
+    ma = ARIMA(train, order=(0, 0, 1)).fit()
+    results["MA(1)"] = np.sqrt(mean_squared_error(test, ma.forecast(len(test))))
+    arima = ARIMA(train, order=(1, 0, 1)).fit()
+    results["ARIMA(1,0,1)"] = np.sqrt(mean_squared_error(test, arima.forecast(len(test))))
+    sarima = SARIMAX(train, order=(1, 0, 1), seasonal_order=(0, 1, 1, 7)).fit(disp=False)
+    results["SARIMA(1,0,1)(0,1,1,7)"] = np.sqrt(mean_squared_error(test, sarima.forecast(len(test))))
+    best_model = min(results, key=results.get)
+    return results, best_model
+
+
+def forecast_future(df, steps=90):
+    model = SARIMAX(df["SCORE"], order=(1, 0, 1), seasonal_order=(0, 1, 1, 7)).fit(disp=False)
+    forecast = model.get_forecast(steps=steps)
+    pred_mean = forecast.predicted_mean
+    pred_ci = forecast.conf_int()
+    future_dates = pd.date_range(df.index[-1] + pd.Timedelta(days=1), periods=steps, freq="D")
+    return future_dates, pred_mean, pred_ci
+
+
+def recommend_by_season(combined_df, season):
+    season_months = {"winter": [12, 1, 2], "spring": [3, 4, 5], "summer": [6, 7, 8], "autumn": [9, 10, 11]}
+    df = combined_df.copy()
+    df["month"] = df["DATE"].dt.month
+    top = (
+        df[df["month"].isin(season_months[season.lower()])]
+        .groupby("country")["SCORE"]
+        .mean()
+        .sort_values(ascending=False)
+        .head(15)
+    )
+    return top
+
+
+# ===============================
+# MAIN INTERFACE
+# ===============================
+st.markdown("<h1>Urban Mood Forecaster</h1>", unsafe_allow_html=True)
+st.markdown(
+    "<p style='text-align:center; font-size:22px;'>Analyze global sentiment trends, discover the most positive travel seasons, and explore data-driven insights about city mood dynamics.</p>",
+    unsafe_allow_html=True
+)
+st.write("")
+
+data_directory = os.path.join(BASE_DIR, "dataverse_files", "Sentiment Data - Country")
+combined_df = load_sentiment_data(data_directory)
+
+# --- Persistent option storage ---
+if "option" not in st.session_state:
+    st.session_state.option = None
+
+# --- Main navigation buttons ---
+col1, col2, col3 = st.columns(3)
+with col1:
+    if st.button("Forecast Sentiment", use_container_width=True):
+        st.session_state.option = "forecast"
+with col2:
+    if st.button("Best Season to Visit", use_container_width=True):
+        st.session_state.option = "best_season"
+with col3:
+    if st.button("Happiest Countries by Season", use_container_width=True):
+        st.session_state.option = "happiest"
+
+
+# ===============================
+# FUNCTIONAL SECTIONS
+# ===============================
+
+# ---------- FORECAST SECTION ----------
+if st.session_state.option == "forecast":
+    st.subheader("Forecast Sentiment for a Country")
+
+    countries = sorted(combined_df["country"].unique())
+    country = st.selectbox("Select a country:", countries)
+
+    df = get_country_data(combined_df, country)
+    st.line_chart(df["SCORE"], use_container_width=True)
+
+    train_size = int(len(df) * 0.8)
+    train, test = df["SCORE"][:train_size], df["SCORE"][train_size:]
+
+    forecast_horizon = st.number_input(
+        "How many days ahead would you like to forecast?",
+        min_value=7, max_value=365, value=90, step=7,
+        help="Choose between 7 and 365 days."
+    )
+
+    if st.button("Run Forecast"):
+        results, best_model = evaluate_models(train, test)
+        st.write("### Model RMSEs")
+        st.dataframe(pd.DataFrame(list(results.items()), columns=["Model", "RMSE"]))
+        st.success(f"Best Performing Model: {best_model}")
+
+        future_dates, pred_mean, pred_ci = forecast_future(df, steps=int(forecast_horizon))
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=df.index, y=df["SCORE"], mode="lines", name="Observed",
+                                 line=dict(color="#2C2C2C", width=2)))
+        fig.add_trace(go.Scatter(x=future_dates, y=pred_mean, mode="lines",
+                                 name=f"{forecast_horizon}-Day Forecast",
+                                 line=dict(color="#0055FF", width=3)))
+        fig.add_trace(go.Scatter(x=future_dates, y=pred_ci.iloc[:, 0], fill=None, mode="lines",
+                                 line=dict(color="rgba(0,136,255,0)", width=0), showlegend=False))
+        fig.add_trace(go.Scatter(x=future_dates, y=pred_ci.iloc[:, 1], fill='tonexty', mode="lines",
+                                 line=dict(color="rgba(0,136,255,0)", width=0),
+                                 fillcolor="rgba(0,136,255,0.15)", name="Confidence Interval"))
+        fig.update_layout(
+            title=f"Forecasted Sentiment for {country} ({forecast_horizon} Days Ahead)",
+            template="plotly_white",
+            xaxis_title="Date",
+            yaxis_title="Sentiment Score",
+            legend=dict(orientation="h", yanchor="bottom", y=-0.3, xanchor="center", x=0.5)
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+
+# ---------- BEST SEASON TO VISIT ----------
+elif st.session_state.option == "best_season":
+    st.subheader("Best Season to Visit a Country")
+
+    countries = sorted(combined_df["country"].unique())
+    country = st.selectbox("Select a country:", countries)
+
+    df = combined_df[combined_df["country"] == country].copy()
+    df["month"] = df["DATE"].dt.month
+
+    season_labels = {
+        "winter": [12, 1, 2],
+        "spring": [3, 4, 5],
+        "summer": [6, 7, 8],
+        "autumn": [9, 10, 11],
+    }
+
+    season_scores = {}
+    for season, months in season_labels.items():
+        season_scores[season] = df[df["month"].isin(months)]["SCORE"].mean()
+
+    season_df = pd.DataFrame(list(season_scores.items()), columns=["Season", "Average Sentiment"]).sort_values(
+        "Average Sentiment", ascending=False
+    )
+
+    best_season = season_df.iloc[0]["Season"].capitalize()
+
+    st.write(f"### 🌤️ Sentiment by Season in {country}")
+    st.dataframe(season_df)
+
+    fig = px.bar(
+        season_df,
+        x="Season",
+        y="Average Sentiment",
+        color="Season",
+        color_discrete_sequence=px.colors.qualitative.Pastel,
+        title=f"Seasonal Sentiment Averages — {country}",
+    )
+    fig.update_layout(template="plotly_white", showlegend=False)
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.success(f"✨ The best season to visit **{country}** is **{best_season}**, with the highest average sentiment score!")
+
+
+# ---------- HAPPIEST COUNTRIES ----------
+elif st.session_state.option == "happiest":
+    st.subheader("Happiest Countries by Season")
+
+    combined_df["country"] = combined_df["country"].astype(str).str.strip()
+    season = st.selectbox("Choose a season:", ["winter", "spring", "summer", "autumn"])
+    top = recommend_by_season(combined_df, season)
+
+    if top.empty:
+        st.warning("No data found for this season. Please check your dataset or date formatting.")
+    else:
+        st.dataframe(top.rename("Average Sentiment"))
+        st.success(f"Top {len(top)} happiest countries in {season.capitalize()} 🌞")
+
+        if st.checkbox("Show Continent Breakdown"):
+            continent_data = []
+            for country in top.index:
+                try:
+                    match = pycountry.countries.search_fuzzy(country)[0]
+                    alpha2 = match.alpha_2
+                    continent_code = pc.country_alpha2_to_continent_code(alpha2)
+                    continent_name = {
+                        "AF": "Africa", "NA": "North America", "OC": "Oceania",
+                        "AN": "Antarctica", "AS": "Asia", "EU": "Europe", "SA": "South America",
+                    }.get(continent_code, "Unknown")
+                except Exception:
+                    continent_name = "Unknown"
+                continent_data.append((country, continent_name))
+
+            continent_df = pd.DataFrame(continent_data, columns=["Country", "Continent"])
+            st.markdown("### 🌍 Continent Breakdown")
+            st.dataframe(continent_df)
+
+            continent_counts = continent_df["Continent"].value_counts().reset_index()
+            continent_counts.columns = ["Continent", "Count"]
+
+            fig = px.bar(
+                continent_counts,
+                x="Continent",
+                y="Count",
+                text="Count",
+                title=f"Distribution of Top {len(top)} Happiest Countries by Continent ({season.capitalize()})",
+                color="Continent",
+                color_discrete_sequence=px.colors.qualitative.Set3,
+            )
+            fig.update_traces(textposition="outside")
+            fig.update_layout(
+                xaxis_title="Continent",
+                yaxis_title="Number of Countries",
+                template="plotly_white",
+                showlegend=False,
+            )
+            st.plotly_chart(fig, use_container_width=True)
