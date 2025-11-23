@@ -136,8 +136,7 @@ time_series_urban_mood_analysis/
 │   ├── Sentiment Data - County/
 │   └── Sentiment Data - World/
 ├── Background.png            # App background image
-├── cityscape font.ttf        # Custom font
-└── Target logo.png           # Logo
+└── cityscape font.ttf        # Custom font
 ```
 
 ## Data
