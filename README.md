@@ -213,10 +213,6 @@ See `requirments.txt` for full dependency list. Key packages:
 - streamlit
 - tensorflow (optional, for RNN models)
 
-## License
+## Canva Presentation link
 
-This project is for educational and research purposes.
-
-## Support
-
-For issues or questions, check the code comments or notebook documentation.
+(https://www.canva.com/design/DAG5h_aee48/r0NQOyU0gaLTIl1SwrZAPQ/edit?utm_content=DAG5h_aee48&utm_campaign=designshare&utm_medium=link2&utm_source=sharebutton)
