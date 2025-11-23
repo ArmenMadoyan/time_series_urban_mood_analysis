@@ -119,10 +119,29 @@ add_bg_and_font(
 # ===============================
 # DATA LOADING WITH CACHING
 # ===============================
+def _resolve_sample_fraction():
+    """Read sample fraction from env and validate."""
+    env_value = os.environ.get("SENTIMENT_SAMPLE_FRACTION")
+    if not env_value:
+        return 1.0
+    try:
+        fraction = float(env_value)
+    except ValueError:
+        st.warning(f"Invalid SENTIMENT_SAMPLE_FRACTION='{env_value}'. Falling back to full dataset.")
+        return 1.0
+    if not 0 < fraction <= 1:
+        st.warning(
+            f"SENTIMENT_SAMPLE_FRACTION must be between 0 and 1. "
+            f"Got {fraction}. Falling back to full dataset."
+        )
+        return 1.0
+    return fraction
+
+
 @st.cache_data
-def load_data_cached(data_directory):
+def load_data_cached(data_directory, sample_fraction):
     """Wrapper to cache data loading for Streamlit."""
-    return load_sentiment_data(data_directory)
+    return load_sentiment_data(data_directory, sample_fraction=sample_fraction)
 
 
 # ===============================
@@ -136,7 +155,11 @@ st.markdown(
 st.write("")
 
 data_directory = os.path.join(BASE_DIR, "dataverse_files", "Sentiment Data - Country")
-combined_df = load_data_cached(data_directory)
+sample_fraction = _resolve_sample_fraction()
+combined_df = load_data_cached(data_directory, sample_fraction)
+
+if sample_fraction < 1.0:
+    st.info(f"Using {sample_fraction:.0%} of the dataset for quicker experiments.")
 
 # --- Persistent option storage ---
 if "option" not in st.session_state:

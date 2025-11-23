@@ -130,6 +130,7 @@ time_series_urban_mood_analysis/
 ├── User_Input.py             # CLI version
 ├── Urban Mood Analysis.ipynb # Jupyter notebook analysis
 ├── requirments.txt           # Python dependencies
+├── create_sampled_dataset.py # Utility to downsample datasets safely
 ├── dataverse_files/          # Data directory (CSV files)
 │   ├── Sentiment Data - Country/
 │   ├── Sentiment Data - State/
@@ -145,6 +146,29 @@ The application uses sentiment data from CSV files in the `dataverse_files/` dir
 - **Country-level data**: Used by default in the app
 - **Time range**: 2012-2023
 - **Format**: Daily sentiment scores per country
+
+## Working with Smaller Samples
+
+The raw `dataverse_files/` directory can be quite large. A full copy now lives in `dataverse_files_full/` so the original download stays untouched. Use the new `create_sampled_dataset.py` utility whenever you need a lighter-weight dataset:
+
+```bash
+# Keep only 25% of each CSV in a fresh directory
+python3 create_sampled_dataset.py \
+  --source dataverse_files_full \
+  --destination dataverse_files_sampled \
+  --fraction 0.25
+```
+
+Point training scripts to the sampled directory, or let the app/CLI automatically sample rows by setting an environment variable before launching:
+
+```bash
+export SENTIMENT_SAMPLE_FRACTION=0.25
+streamlit run app.py
+# or
+SENTIMENT_SAMPLE_FRACTION=0.25 python User_Input.py
+```
+
+Both approaches leave the original dataset untouched while allowing faster iterations.
 
 ## Models Available
 
@@ -196,4 +220,3 @@ This project is for educational and research purposes.
 ## Support
 
 For issues or questions, check the code comments or notebook documentation.
-

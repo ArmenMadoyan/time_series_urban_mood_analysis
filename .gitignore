@@ -110,6 +110,11 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+tfenv/
+venv/
+.env/
+*.env
+
 
 # Spyder project settings
 .spyderproject
@@ -152,8 +157,7 @@ cython_debug/
 ehthumbs.db
 Thumbs.db
 
-# Project-specific
-dataverse_files/
+
 
 # Saved models
 models/
@@ -169,4 +173,3 @@ models/
 # *.ttf
 # *.woff
 # *.woff2
-

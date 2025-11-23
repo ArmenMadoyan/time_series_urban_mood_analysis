@@ -34,16 +34,21 @@ warnings.filterwarnings("ignore")
 # DATA LOADING FUNCTIONS
 # ===============================
 
-def load_sentiment_data(data_directory):
+def load_sentiment_data(data_directory, sample_fraction=1.0, random_state=42):
     """
     Load and combine all CSV files from the data directory.
     
     Args:
         data_directory: Path to directory containing CSV files
+        sample_fraction: Optional fraction of rows to keep from each CSV
+        random_state: Random seed to ensure deterministic sampling
         
     Returns:
         Combined DataFrame with all sentiment data
     """
+    if sample_fraction <= 0 or sample_fraction > 1:
+        raise ValueError("sample_fraction must be in the (0, 1] interval.")
+
     df_list = []
     csv_files = [f for f in os.listdir(data_directory) if f.endswith(".csv")]
     
@@ -52,6 +57,10 @@ def load_sentiment_data(data_directory):
         temp_df = pd.read_csv(file_path)
         year = file.split("_")[-1].replace(".csv", "").replace("-1", "")
         temp_df["year"] = int(year)
+
+        if 0 < sample_fraction < 1:
+            temp_df = temp_df.sample(frac=sample_fraction, random_state=random_state)
+
         df_list.append(temp_df)
     
     combined_df = pd.concat(df_list, ignore_index=True)
@@ -761,4 +770,3 @@ def get_continent_breakdown(country_list):
         continent_name = get_continent_from_country(country)
         continent_data.append((country, continent_name))
     return continent_data
-

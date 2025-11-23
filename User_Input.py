@@ -19,16 +19,36 @@ import warnings
 import difflib
 import difflib
 import pycountry
-import pycountry_convert as pc 
+import pycountry_convert as pc
+from backend import forecast_with_rnn, TENSORFLOW_AVAILABLE
 
 warnings.filterwarnings("ignore")
+
+
+def _resolve_sample_fraction():
+    """Read SENTIMENT_SAMPLE_FRACTION env var and keep it in (0, 1]."""
+    env_value = os.environ.get("SENTIMENT_SAMPLE_FRACTION")
+    if not env_value:
+        return 1.0
+    try:
+        fraction = float(env_value)
+    except ValueError:
+        print(f"[WARN] Invalid SENTIMENT_SAMPLE_FRACTION='{env_value}'. Using full dataset.")
+        return 1.0
+    if not 0 < fraction <= 1:
+        print(f"[WARN] SENTIMENT_SAMPLE_FRACTION must be between 0 and 1. Got {fraction}. Using full dataset.")
+        return 1.0
+    return fraction
 
 # =====================================================
 # 1. DATA LOADING
 # =====================================================
 
-def load_sentiment_data(data_directory):
+def load_sentiment_data(data_directory, sample_fraction=1.0, random_state=42):
     """Combine yearly CSV files into one DataFrame."""
+    if sample_fraction <= 0 or sample_fraction > 1:
+        raise ValueError("sample_fraction must be in the (0, 1] interval.")
+
     df_list = []
     csv_files = [f for f in os.listdir(data_directory) if f.endswith(".csv")]
 
@@ -37,6 +57,10 @@ def load_sentiment_data(data_directory):
         temp_df = pd.read_csv(file_path)
         year = file.split("_")[-1].replace(".csv", "").replace("-1", "")
         temp_df["year"] = int(year)
+
+        if 0 < sample_fraction < 1:
+            temp_df = temp_df.sample(frac=sample_fraction, random_state=random_state)
+
         df_list.append(temp_df)
 
     combined_df = pd.concat(df_list, ignore_index=True)
@@ -148,6 +172,76 @@ def recommend_by_season(combined_df, season):
 # =====================================================
 
 
+def _prompt_int(prompt, default, min_value=None, max_value=None):
+    """Prompt user for an integer; enforce bounds, fall back to default on invalid input."""
+    raw = input(f"{prompt} [default={default}]: ").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        print("⚠️ Invalid number. Using default.")
+        return default
+    if min_value is not None and value < min_value:
+        print(f"⚠️ Value must be at least {min_value}. Using default.")
+        return default
+    if max_value is not None and value > max_value:
+        print(f"⚠️ Value must be at most {max_value}. Using default.")
+        return default
+    return value
+
+
+def run_rnn_forecast(combined_df):
+    """Interactive workflow for training/using an RNN model."""
+    if not TENSORFLOW_AVAILABLE:
+        print("\n❌ TensorFlow is not installed, so RNN models are unavailable.")
+        print("   Install TensorFlow (see requirments.txt) and try again.\n")
+        return
+
+    available_countries = sorted(combined_df["country"].unique())
+    country = input("\nEnter a country for the RNN forecast (or 'back' to menu): ").strip()
+    if country.lower() == "back":
+        return
+
+    match = [c for c in available_countries if c.lower() == country.lower()]
+    if not match:
+        suggestion = difflib.get_close_matches(country, available_countries, n=3, cutoff=0.6)
+        if suggestion:
+            print(f"\n⚠️ Couldn't find '{country}'. Possible matches: {', '.join(suggestion)}")
+        else:
+            print("❌ No data found for that country.")
+        return
+
+    country = match[0]
+    df = get_country_data(combined_df, country)
+
+    print("\nAvailable RNN architectures:")
+    model_options = {
+        "1": ("lstm", "LSTM"),
+        "2": ("gru", "GRU"),
+        "3": ("bilstm", "Bidirectional LSTM"),
+        "4": ("stacked_lstm", "Stacked LSTM")
+    }
+    for key, (_, label) in model_options.items():
+        print(f"{key}. {label}")
+    model_choice = input("Choose a model type (1-4): ").strip()
+    model_type, model_label = model_options.get(model_choice, ("lstm", "LSTM"))
+
+    seq_length = _prompt_int("Sequence length (timesteps fed into the network)", 30, min_value=10, max_value=180)
+    steps = _prompt_int("Forecast horizon (days ahead)", 90, min_value=7, max_value=365)
+    epochs = _prompt_int("Max training epochs (used when no saved model exists yet)", 20, min_value=5, max_value=100)
+
+    print(f"\n🤖 Training/using {model_label} model for {country}...")
+    future_dates, pred_mean, pred_ci = forecast_with_rnn(
+        df, model_type=model_type, seq_length=seq_length, steps=steps, epochs=epochs, country=country
+    )
+
+    if pred_mean is None:
+        print("❌ RNN forecast failed. Try different parameters or fall back to classical models.")
+        return
+
+    print(f"✅ Generated {steps}-day {model_label} forecast for {country}.")
+    plot_forecast(df, future_dates, pred_mean, pred_ci, f"{country} ({model_label})")
 
 
 # =====================================================
@@ -177,18 +271,25 @@ def get_continent_from_iso3(iso3):
 # =====================================================
 
 def main():
-    data_directory = "/Users/user/Desktop/Urban Mood Analysis/dataverse_files/Sentiment Data - Country"
-    combined_df = load_sentiment_data(data_directory)
-    print(f"✅ Loaded {len(combined_df):,} rows from {combined_df['country'].nunique()} countries.\n")
+    # Resolve dataset path relative to this script so it works on any machine
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    data_directory = os.path.join(base_dir, "dataverse_files", "Sentiment Data - Country")
+    sample_fraction = _resolve_sample_fraction()
+    combined_df = load_sentiment_data(data_directory, sample_fraction=sample_fraction)
+    print(f"✅ Loaded {len(combined_df):,} rows from {combined_df['country'].nunique()} countries.")
+    if sample_fraction < 1.0:
+        print(f"⚡ Using {sample_fraction:.0%} of the dataset for faster experimentation.")
+    print()
 
     while True:
         print("\n🌍 What would you like to do?")
         print("1️⃣  Forecast sentiment for a country")
         print("2️⃣  Find the best season to visit a chosen country")
         print("3️⃣  Find the happiest countries in a chosen season")
-        print("4️⃣  Exit")
+        print("4️⃣  Run an RNN-based forecast")
+        print("5️⃣  Exit")
 
-        choice = input("Select an option (1-4): ").strip()
+        choice = input("Select an option (1-5): ").strip()
 
         if choice == "1":
             # === FORECAST ===
@@ -270,11 +371,14 @@ def main():
                     print(f"{c}: {cont}")
 
         elif choice == "4":
+            run_rnn_forecast(combined_df)
+
+        elif choice == "5":
             print("👋 Exiting. See you next time!")
             break
 
         else:
-            print("❌ Invalid option. Please choose 1-4.")
+            print("❌ Invalid option. Please choose 1-5.")
 
 
 
