@@ -155,6 +155,11 @@ Thumbs.db
 # Project-specific
 dataverse_files/
 
+# Saved models
+models/
+*.h5
+*.pkl
+
 # Large files (optional - uncomment if needed)
 # *.png
 # *.jpg
