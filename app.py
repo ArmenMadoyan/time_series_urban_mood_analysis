@@ -196,12 +196,29 @@ if st.session_state.option == "forecast":
 
     if st.button("Run Forecast"):
         with st.spinner("Training models... This may take a moment, especially with RNN models."):
-            results, best_model = evaluate_models(train, test, include_rnn=include_rnn)
+            results, best_model = evaluate_models(train, test, include_rnn=include_rnn, country=country)
         st.write("### Model RMSEs")
         st.dataframe(pd.DataFrame(list(results.items()), columns=["Model", "RMSE"]))
         st.success(f"Best Performing Model: {best_model}")
 
-        future_dates, pred_mean, pred_ci = forecast_future(df, steps=int(forecast_horizon))
+        # Determine which model to use for forecasting
+        forecast_model_type = "sarima"  # Default
+        if best_model == "LSTM":
+            forecast_model_type = "lstm"
+        elif best_model == "GRU":
+            forecast_model_type = "gru"
+        elif best_model == "Bidirectional LSTM":
+            forecast_model_type = "bilstm"
+        elif best_model == "Stacked LSTM":
+            forecast_model_type = "stacked_lstm"
+        
+        # Generate forecast using best model (will load saved model if available)
+        future_dates, pred_mean, pred_ci = forecast_future(
+            df, 
+            steps=int(forecast_horizon),
+            model_type=forecast_model_type,
+            country=country
+        )
 
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=df.index, y=df["SCORE"], mode="lines", name="Observed",
