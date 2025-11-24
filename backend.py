@@ -138,6 +138,27 @@ def _get_model_path(country, model_type, base_dir="models"):
     return model_dir
 
 
+def check_rnn_models_exist(country, base_dir="models"):
+    """
+    Check if any RNN models exist for a given country.
+    Returns True if at least one model exists, False otherwise.
+    """
+    if not country:
+        return False
+    
+    rnn_model_types = ["lstm", "gru", "bilstm", "stacked_lstm"]
+    
+    for model_type in rnn_model_types:
+        model_dir = _get_model_path(country, model_type, base_dir)
+        model_path = os.path.join(model_dir, "model.h5")
+        scaler_path = os.path.join(model_dir, "scaler.pkl")
+        
+        if os.path.exists(model_path) and os.path.exists(scaler_path):
+            return True
+    
+    return False
+
+
 def save_rnn_model(model, scaler, country, model_type, seq_length, base_dir="models"):
     """Save trained RNN model and scaler"""
     if not TENSORFLOW_AVAILABLE or model is None:
@@ -389,6 +410,66 @@ def train_stacked_lstm_model(X_train, y_train, X_test, y_test, scaler, seq_lengt
 # MODEL EVALUATION FUNCTIONS
 # ===============================
 
+def evaluate_saved_rnn_model(country, model_type, train, test, seq_length=30):
+    """
+    Evaluate a saved RNN model on test data without retraining.
+    Returns predictions and RMSE if model exists, None otherwise.
+    """
+    if not TENSORFLOW_AVAILABLE or not country:
+        return None, None
+    
+    try:
+        # Try to load saved model
+        model, scaler, metadata = load_rnn_model(country, model_type)
+        if model is None or scaler is None:
+            return None, None
+        
+        # Use metadata seq_length if available
+        saved_seq_length = metadata.get('seq_length', seq_length) if metadata else seq_length
+        
+        # Prepare data: combine train and test, then scale with saved scaler
+        # This matches how the model was originally trained
+        all_data = np.concatenate([train.values, test.values]).reshape(-1, 1)
+        data_scaled = scaler.transform(all_data).flatten()
+        
+        # Split back to train and test scaled
+        train_scaled = data_scaled[:len(train)]
+        test_scaled = data_scaled[len(train):]
+        
+        # Create sequences for test set
+        # Test sequences should start from the end of training data
+        # For each test point, we need a sequence ending at that point
+        # The sequence should include the last (seq_length-1) training points + test points
+        
+        # Combine last part of train with test for sequence creation
+        combined_for_test = np.concatenate([train_scaled[-saved_seq_length:], test_scaled])
+        X_test, y_test = create_sequences(combined_for_test, saved_seq_length)
+        
+        if len(X_test) == 0:
+            return None, None
+        
+        # Reshape for RNN
+        X_test = X_test.reshape((X_test.shape[0], X_test.shape[1], 1))
+        
+        # Make predictions
+        pred_scaled = model.predict(X_test, verbose=0)
+        pred_original = scaler.inverse_transform(pred_scaled).flatten()
+        
+        # Align with test data (skip first seq_length points that overlap with train)
+        # The predictions correspond to test data starting from index 0
+        test_aligned = test.iloc[:len(pred_original)]
+        if len(pred_original) != len(test_aligned):
+            min_len = min(len(pred_original), len(test_aligned))
+            pred_original = pred_original[:min_len]
+            test_aligned = test_aligned[:min_len]
+        
+        rmse = np.sqrt(mean_squared_error(test_aligned, pred_original))
+        
+        return pred_original, rmse
+    except Exception as e:
+        return None, None
+
+
 def evaluate_models(train, test, include_rnn=True, seq_length=30, rnn_epochs=30, country=None):
     """
     Evaluate multiple time series models and return RMSE for each.
@@ -428,63 +509,67 @@ def evaluate_models(train, test, include_rnn=True, seq_length=30, rnn_epochs=30,
     # RNN Models (if TensorFlow is available and requested)
     if include_rnn and TENSORFLOW_AVAILABLE and len(train) > seq_length and len(test) > seq_length:
         try:
-            # Prepare RNN data
-            X_train_rnn, y_train_rnn, X_test_rnn, y_test_rnn, scaler_rnn = prepare_rnn_data(
-                train, test, seq_length=seq_length
-            )
+            # Check for saved models first (if country provided)
+            # If saved models exist, use them for evaluation (FAST)
+            # Otherwise, train new models (SLOW)
             
-            # LSTM Model
-            lstm_pred, lstm_rmse, lstm_model = train_lstm_model(
-                X_train_rnn, y_train_rnn, X_test_rnn, y_test_rnn, 
-                scaler_rnn, seq_length=seq_length, epochs=rnn_epochs, verbose=0
-            )
-            if lstm_rmse is not None:
-                # Calculate RMSE on original scale
-                test_aligned = test.iloc[seq_length:]
-                lstm_rmse_original = np.sqrt(mean_squared_error(test_aligned, lstm_pred))
-                results["LSTM"] = lstm_rmse_original
-                # Save ALL models (not just best)
-                if country and lstm_model:
-                    save_rnn_model(lstm_model, scaler_rnn, country, "lstm", seq_length)
+            rnn_models_to_evaluate = [
+                ("lstm", "LSTM"),
+                ("gru", "GRU"),
+                ("bilstm", "Bidirectional LSTM"),
+                ("stacked_lstm", "Stacked LSTM")
+            ]
             
-            # GRU Model
-            gru_pred, gru_rmse, gru_model = train_gru_model(
-                X_train_rnn, y_train_rnn, X_test_rnn, y_test_rnn,
-                scaler_rnn, seq_length=seq_length, epochs=rnn_epochs, verbose=0
-            )
-            if gru_rmse is not None:
-                test_aligned = test.iloc[seq_length:]
-                gru_rmse_original = np.sqrt(mean_squared_error(test_aligned, gru_pred))
-                results["GRU"] = gru_rmse_original
-                # Save ALL models
-                if country and gru_model:
-                    save_rnn_model(gru_model, scaler_rnn, country, "gru", seq_length)
-            
-            # Bidirectional LSTM Model
-            bilstm_pred, bilstm_rmse, bilstm_model = train_bilstm_model(
-                X_train_rnn, y_train_rnn, X_test_rnn, y_test_rnn,
-                scaler_rnn, seq_length=seq_length, epochs=rnn_epochs, verbose=0
-            )
-            if bilstm_rmse is not None:
-                test_aligned = test.iloc[seq_length:]
-                bilstm_rmse_original = np.sqrt(mean_squared_error(test_aligned, bilstm_pred))
-                results["Bidirectional LSTM"] = bilstm_rmse_original
-                # Save ALL models
-                if country and bilstm_model:
-                    save_rnn_model(bilstm_model, scaler_rnn, country, "bilstm", seq_length)
-            
-            # Stacked LSTM Model
-            stacked_pred, stacked_rmse, stacked_model = train_stacked_lstm_model(
-                X_train_rnn, y_train_rnn, X_test_rnn, y_test_rnn,
-                scaler_rnn, seq_length=seq_length, epochs=rnn_epochs, verbose=0
-            )
-            if stacked_rmse is not None:
-                test_aligned = test.iloc[seq_length:]
-                stacked_rmse_original = np.sqrt(mean_squared_error(test_aligned, stacked_pred))
-                results["Stacked LSTM"] = stacked_rmse_original
-                # Save ALL models
-                if country and stacked_model:
-                    save_rnn_model(stacked_model, scaler_rnn, country, "stacked_lstm", seq_length)
+            for model_type, model_name in rnn_models_to_evaluate:
+                # Try to use saved model first
+                if country:
+                    saved_pred, saved_rmse = evaluate_saved_rnn_model(
+                        country, model_type, train, test, seq_length
+                    )
+                    if saved_rmse is not None:
+                        # Use saved model (FAST - no training!)
+                        results[model_name] = saved_rmse
+                        continue  # Skip training for this model
+                
+                # No saved model found - train new one
+                # Prepare RNN data
+                X_train_rnn, y_train_rnn, X_test_rnn, y_test_rnn, scaler_rnn = prepare_rnn_data(
+                    train, test, seq_length=seq_length
+                )
+                
+                # Train model based on type
+                if model_type == "lstm":
+                    pred, rmse, trained_model = train_lstm_model(
+                        X_train_rnn, y_train_rnn, X_test_rnn, y_test_rnn,
+                        scaler_rnn, seq_length=seq_length, epochs=rnn_epochs, verbose=0
+                    )
+                elif model_type == "gru":
+                    pred, rmse, trained_model = train_gru_model(
+                        X_train_rnn, y_train_rnn, X_test_rnn, y_test_rnn,
+                        scaler_rnn, seq_length=seq_length, epochs=rnn_epochs, verbose=0
+                    )
+                elif model_type == "bilstm":
+                    pred, rmse, trained_model = train_bilstm_model(
+                        X_train_rnn, y_train_rnn, X_test_rnn, y_test_rnn,
+                        scaler_rnn, seq_length=seq_length, epochs=rnn_epochs, verbose=0
+                    )
+                elif model_type == "stacked_lstm":
+                    pred, rmse, trained_model = train_stacked_lstm_model(
+                        X_train_rnn, y_train_rnn, X_test_rnn, y_test_rnn,
+                        scaler_rnn, seq_length=seq_length, epochs=rnn_epochs, verbose=0
+                    )
+                else:
+                    continue
+                
+                if rmse is not None:
+                    # Calculate RMSE on original scale
+                    test_aligned = test.iloc[seq_length:]
+                    rmse_original = np.sqrt(mean_squared_error(test_aligned, pred))
+                    results[model_name] = rmse_original
+                    
+                    # Save newly trained model (if country provided)
+                    if country and trained_model:
+                        save_rnn_model(trained_model, scaler_rnn, country, model_type, seq_length)
                 
         except Exception as e:
             # If RNN training fails, continue without RNN models

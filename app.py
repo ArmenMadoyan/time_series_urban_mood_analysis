@@ -15,6 +15,7 @@ from backend import (
     recommend_by_season,
     get_seasonal_scores,
     get_continent_breakdown,
+    check_rnn_models_exist,
     TENSORFLOW_AVAILABLE
 )
 
@@ -217,9 +218,40 @@ if st.session_state.option == "forecast":
                 st.warning("⚠️ TensorFlow not installed - RNN models will be skipped")
                 include_rnn = False
 
+    # Initialize session state for caching evaluation results
+    cache_key = f"eval_{country}_{include_rnn}"
+    
+    # Check if we can use cached results (same country and RNN setting)
+    use_cached = (
+        cache_key in st.session_state and 
+        st.session_state.get(f"cached_country_{cache_key}") == country
+    )
+    
+    # Show cache status
+    if use_cached:
+        st.info("💡 **Tip:** Evaluation results are cached. Changing forecast horizon will be fast!")
+    
     if st.button("Run Forecast"):
-        with st.spinner("Training models... This may take a moment, especially with RNN models."):
-            results, best_model = evaluate_models(train, test, include_rnn=include_rnn, country=country)
+        # Evaluation step (only if not cached)
+        if not use_cached:
+            # Check if models exist to show appropriate message
+            models_exist = check_rnn_models_exist(country) if country and include_rnn else False
+            if models_exist:
+                status_message = "⚡ Evaluating models (using saved models - fast!)..."
+            else:
+                status_message = "🔄 Training models... This may take a moment, especially with RNN models."
+            
+            with st.spinner(status_message):
+                results, best_model = evaluate_models(train, test, include_rnn=include_rnn, country=country)
+            
+            # Cache the results
+            st.session_state[cache_key] = (results, best_model)
+            st.session_state[f"cached_country_{cache_key}"] = country
+        else:
+            # Use cached results (FAST - no evaluation needed!)
+            results, best_model = st.session_state[cache_key]
+            st.success("⚡ Using cached evaluation results - skipping re-evaluation!")
+        
         st.write("### Model RMSEs")
         st.dataframe(pd.DataFrame(list(results.items()), columns=["Model", "RMSE"]))
         st.success(f"Best Performing Model: {best_model}")
@@ -236,12 +268,13 @@ if st.session_state.option == "forecast":
             forecast_model_type = "stacked_lstm"
         
         # Generate forecast using best model (will load saved model if available)
-        future_dates, pred_mean, pred_ci = forecast_future(
-            df, 
-            steps=int(forecast_horizon),
-            model_type=forecast_model_type,
-            country=country
-        )
+        with st.spinner("🔄 Generating forecast..."):
+            future_dates, pred_mean, pred_ci = forecast_future(
+                df, 
+                steps=int(forecast_horizon),
+                model_type=forecast_model_type,
+                country=country
+            )
 
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=df.index, y=df["SCORE"], mode="lines", name="Observed",
