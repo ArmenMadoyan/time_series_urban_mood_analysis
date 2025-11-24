@@ -1,0 +1,22 @@
+# Core data science libraries
+pandas==2.3.3
+numpy==2.0.2
+
+# Visualization
+plotly==6.3.1
+
+# Time series analysis
+statsmodels==0.14.5
+
+# Machine learning
+scikit-learn==1.6.1
+
+# Deep learning (optional - for RNN models)
+#tensorflow>=2.13.0
+#for macbook  pip install tensorflow-macos
+# Country/geography utilities
+pycountry==24.6.1
+pycountry-convert==0.7.2
+
+# Web application framework
+streamlit

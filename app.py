@@ -232,6 +232,12 @@ if st.session_state.option == "forecast":
         st.info("💡 **Tip:** Evaluation results are cached. Changing forecast horizon will be fast!")
     
     if st.button("Run Forecast"):
+<<<<<<< HEAD
+        with st.spinner("Training models... This may take a moment, especially with RNN models."):
+            results, best_model, roc_metadata = evaluate_models(
+                train, test, include_rnn=include_rnn, country=country
+            )
+=======
         # Evaluation step (only if not cached)
         if not use_cached:
             # Check if models exist to show appropriate message
@@ -252,9 +258,54 @@ if st.session_state.option == "forecast":
             results, best_model = st.session_state[cache_key]
             st.success("⚡ Using cached evaluation results - skipping re-evaluation!")
         
+>>>>>>> da4ab0c947d01504f8bf423aa397509cb153d5f1
         st.write("### Model RMSEs")
         st.dataframe(pd.DataFrame(list(results.items()), columns=["Model", "RMSE"]))
         st.success(f"Best Performing Model: {best_model}")
+
+        roc_curves = roc_metadata.get("curves", {}) if isinstance(roc_metadata, dict) else {}
+        threshold_info = roc_metadata.get("threshold_info") if isinstance(roc_metadata, dict) else None
+        if roc_curves:
+            st.write("### ROC AUC Curves (Positive vs. lower sentiment)")
+            fig_roc = go.Figure()
+            fig_roc.add_trace(
+                go.Scatter(
+                    x=[0, 1],
+                    y=[0, 1],
+                    mode="lines",
+                    line=dict(color="rgba(0,0,0,0.4)", dash="dash"),
+                    showlegend=False,
+                )
+            )
+            auc_rows = []
+            for model_name, curve in roc_curves.items():
+                auc_rows.append((model_name, curve.get("auc")))
+                fig_roc.add_trace(
+                    go.Scatter(
+                        x=curve.get("fpr", []),
+                        y=curve.get("tpr", []),
+                        mode="lines",
+                        name=f"{model_name} (AUC={curve.get('auc', float('nan')):.3f})",
+                        line=dict(width=2),
+                    )
+                )
+            fig_roc.update_layout(
+                template="plotly_white",
+                xaxis_title="False Positive Rate",
+                yaxis_title="True Positive Rate",
+                legend=dict(orientation="h", yanchor="bottom", y=-0.3, xanchor="center", x=0.5),
+                margin=dict(t=20),
+            )
+            st.plotly_chart(fig_roc, use_container_width=True)
+            if threshold_info and threshold_info.get("value") is not None:
+                st.caption(
+                    f"Binary labels use SCORE ≥ {threshold_info['value']:.3f} ({threshold_info.get('strategy', 'median')} threshold)."
+                )
+            if auc_rows:
+                auc_df = pd.DataFrame(sorted(auc_rows, key=lambda row: row[1], reverse=True), columns=["Model", "ROC AUC"])
+                st.dataframe(auc_df)
+        else:
+            st.info("ROC curves unavailable (test set lacks enough sentiment variation for binary labels).")
 
         # Determine which model to use for forecasting
         forecast_model_type = "sarima"  # Default

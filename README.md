@@ -1,175 +1,130 @@
-# Urban Mood Forecaster
+# Urban Mood Forecaster — Project Overview
 
-A time series analysis and forecasting application for global sentiment trends using traditional statistical models and deep learning RNN models.
+A comprehensive time-series analysis and forecasting project that models global and country-level sentiment trends using both classical statistical methods and deep learning architectures.
 
-## Features
+The system includes data preprocessing, model training, evaluation, and visualization, delivered through a Streamlit web interface, a CLI tool, and a Jupyter notebook.
 
-- **Sentiment Forecasting**: Predict future sentiment scores for any country using multiple models (AR, MA, ARIMA, SARIMA, LSTM, GRU, Bidirectional LSTM)
-- **Seasonal Analysis**: Find the best season to visit a country based on historical sentiment
-- **Travel Recommendations**: Discover the happiest countries by season
-- **Interactive Visualizations**: Beautiful Plotly charts and maps
+---
 
-## Prerequisites
+## Project Goals
 
-- Python 3.8 or higher
-- pip (Python package manager)
+- Build a complete **time-series forecasting pipeline** for global sentiment data.
+- Compare classical models (AR, MA, ARIMA, SARIMA) with deep learning RNNs (LSTM, GRU, Bidirectional LSTM).
+- Extract seasonal patterns to determine:
+  - the **best season to visit each country**,
+  - the **happiest countries by season**.
+- Develop an **interactive application** for forecasting and exploring global emotional trends.
+- Provide clear model comparison using RMSE, MAE, and visualization.
 
-## Installation
+---
 
-1. **Clone or navigate to the project directory:**
-   ```bash
-   cd /Users/amadoyan/time_series_urban_mood_analysis
-   ```
+## Project Description
 
-2. **Create a virtual environment (recommended):**
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate  # On macOS/Linux
-   # or
-   venv\Scripts\activate  # On Windows
-   ```
+The Urban Mood Forecaster constructs weekly and daily sentiment time series (2012–2023), performs stationarity analysis, fits statistical and neural models, and generates forecast outputs.
 
-3. **Install dependencies:**
-   ```bash
-   pip install -r requirments.txt
-   ```
+The project provides three usage modes:
 
-   **Note:** TensorFlow installation may take a few minutes. If you encounter issues or don't need RNN models, you can skip TensorFlow by commenting it out in `requirments.txt`.
+1. **Streamlit Web App** — interactive dashboard for forecasting and seasonal insights.
+2. **CLI Tool** — fast terminal-based analysis.
+3. **Jupyter Notebook** — full methodology, EDA, model comparison, and evaluation.
 
-## Running the Application
+---
 
-### Option 1: Streamlit Web App (Recommended)
+## Dataset
 
-Run the main web application:
+- Global/country-level daily sentiment scores  
+- Time span: **2012–2023**  
+- Source: processed Dataverse CSV files  
+- Used for trend extraction, decomposition, and forecasting  
+- Optional downsampling for faster experimentation
 
-```bash
-streamlit run app.py
-```
+---
 
-The app will automatically open in your default web browser at `http://localhost:8501`
+## Research Methods
 
-**Features:**
-- Interactive web interface
-- Three main functions: Forecast, Best Season, Happiest Countries
-- Optional RNN models (LSTM, GRU, Bidirectional LSTM)
-- Beautiful visualizations
+- Exploratory data analysis and visualization  
+- Stationarity checks (ADF, KPSS, seasonal plots)  
+- Classical forecasting:
+  - AR, MA, ARIMA, SARIMA
+- Deep learning models:
+  - LSTM, GRU, Bidirectional LSTM, Stacked LSTM
+- Evaluation metrics: RMSE, MAE  
+- Visual forecasting comparison  
+- Streamlit UI design
 
-### Option 2: Command Line Interface
+---
 
-Run the CLI version:
+## Methodology
 
-```bash
-python User_Input.py
-```
+1. Data extraction and cleaning  
+2. Time-series construction  
+3. Stationarity testing and seasonal differencing  
+4. Model training (statistical + RNN)  
+5. Forecast generation and evaluation  
+6. Seasonal mood analysis  
+7. Streamlit/CLI development  
+8. Visual result interpretation  
 
-**Features:**
-- Terminal-based menu system
-- Same functionality as web app
-- Good for quick analysis without a browser
+---
 
-### Option 3: Jupyter Notebook
+## Data Pipeline
 
-Open and run the analysis notebook:
+- Load raw CSV files  
+- Clean, sort, and align timestamps  
+- Normalize where necessary  
+- Create sliding windows for RNNs  
+- Train SARIMA and RNN models  
+- Generate forecasts and seasonal summaries  
+- Send results to UI/CLI
 
-```bash
-jupyter notebook "Urban Mood Analysis.ipynb"
-```
+---
 
-**Features:**
-- Comprehensive exploratory data analysis
-- Model comparison and evaluation
-- Deep learning model implementations
-- Interactive visualizations
+## Results
 
-## Usage Guide
+- **Bidirectional LSTM and LSTM** achieved the lowest RMSE and best visual tracking of sentiment.
+- **SARIMA (1,0,1)(0,1,1)\_7** performed strongly as a classical baseline.
+- **GRU** produced smoother predictions, under-reacting to sudden changes.
+- **Stacked LSTM** overfit due to univariate input and model complexity.
+- Seasonal analysis identified clear best-season patterns for most countries.
+- Application outputs accurate forecasts and intuitive global visualizations.
 
-### Web App Usage
-
-1. **Launch the app:**
-   ```bash
-   streamlit run app.py
-   ```
-
-2. **Forecast Sentiment:**
-   - Click "Forecast Sentiment" button
-   - Select a country from the dropdown
-   - Choose forecast horizon (7-365 days)
-   - Optionally enable RNN models
-   - Click "Run Forecast"
-   - View model comparison and forecast chart
-
-3. **Best Season to Visit:**
-   - Click "Best Season to Visit" button
-   - Select a country
-   - View seasonal sentiment breakdown
-   - See recommended season
-
-4. **Happiest Countries by Season:**
-   - Click "Happiest Countries by Season" button
-   - Select a season (winter, spring, summer, autumn)
-   - View top 15 happiest countries
-   - Optionally view continent breakdown
-
-### RNN Models
-
-RNN models (LSTM, GRU, Bidirectional LSTM) are optional and require TensorFlow:
-
-- **To use RNN models:** Check the "Include RNN Models" checkbox
-- **Training time:** RNN models take longer to train (30-60 seconds)
-- **Better accuracy:** Often provide better forecasts for complex patterns
-- **Requirements:** TensorFlow must be installed
-
-If TensorFlow is not installed, the app will work with traditional models only.
+---
 
 ## Project Structure
 
-```
-time_series_urban_mood_analysis/
-├── app.py                    # Streamlit web application (Frontend)
-├── backend.py                # Business logic and models (Backend)
-├── User_Input.py             # CLI version
-├── Urban Mood Analysis.ipynb # Jupyter notebook analysis
-├── requirments.txt           # Python dependencies
-├── create_sampled_dataset.py # Utility to downsample datasets safely
-├── dataverse_files/          # Data directory (CSV files)
-│   ├── Sentiment Data - Country/
-│   ├── Sentiment Data - State/
-│   ├── Sentiment Data - County/
-│   └── Sentiment Data - World/
-├── Background.png            # App background image
-└── cityscape font.ttf        # Custom font
-```
+- Streamlit web interface  
+- Backend model and forecasting engine  
+- CLI terminal tool  
+- Full research notebook  
+- Dataset sampling utilities  
+- Configurable seasonal and forecasting modules
 
-## Data
+---
 
-The application uses sentiment data from CSV files in the `dataverse_files/` directory:
-- **Country-level data**: Used by default in the app
-- **Time range**: 2012-2023
-- **Format**: Daily sentiment scores per country
+## Outcomes and Conclusion
 
-## Working with Smaller Samples
+The project demonstrates that global sentiment can be forecasted effectively using hybrid statistical–deep learning pipelines.  
+LSTM-based models capture short-term fluctuations and non-linearities, while SARIMA provides strong interpretability and seasonal modeling.
 
-The raw `dataverse_files/` directory can be quite large. A full copy now lives in `dataverse_files_full/` so the original download stays untouched. Use the new `create_sampled_dataset.py` utility whenever you need a lighter-weight dataset:
+The final system integrates forecasting, seasonal recommendations, and visual analytics into a practical and accessible application.
 
-```bash
-# Keep only 25% of each CSV in a fresh directory
-python3 create_sampled_dataset.py \
-  --source dataverse_files_full \
-  --destination dataverse_files_sampled \
-  --fraction 0.25
-```
+---
 
-Point training scripts to the sampled directory, or let the app/CLI automatically sample rows by setting an environment variable before launching:
+## Slide Mapping for Presentation
 
-```bash
-export SENTIMENT_SAMPLE_FRACTION=0.25
-streamlit run app.py
-# or
-SENTIMENT_SAMPLE_FRACTION=0.25 python User_Input.py
-```
+- **Slide 1** — Project Title  
+- **Slides 2–3** — Problem Definition  
+- **Slides 4–5** — Dataset Details & Research Methods  
+- **Slides 6–9** — Methodology  
+- **Slides 10–13** — Data Pipeline & Time-Series Construction  
+- **Slides 14–17** — Results  
+- **Slides 18–19** — Project Structure, Outcomes, Conclusion  
+- **Slide 20** — References  
 
-Both approaches leave the original dataset untouched while allowing faster iterations.
+**Note:** Some slides appear longer than listed due to animation (animation = +1 slide).
 
+<<<<<<< HEAD
+=======
 ## Models Available
 
 ### Traditional Models
@@ -216,3 +171,4 @@ See `requirments.txt` for full dependency list. Key packages:
 ## Canva Presentation link
 
 (https://www.canva.com/design/DAG5h_aee48/r0NQOyU0gaLTIl1SwrZAPQ/edit?utm_content=DAG5h_aee48&utm_campaign=designshare&utm_medium=link2&utm_source=sharebutton)
+>>>>>>> da4ab0c947d01504f8bf423aa397509cb153d5f1

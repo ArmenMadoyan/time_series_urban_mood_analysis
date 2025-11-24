@@ -11,7 +11,7 @@ import pandas as pd
 import numpy as np
 from statsmodels.tsa.arima.model import ARIMA
 from statsmodels.tsa.statespace.sarimax import SARIMAX
-from sklearn.metrics import mean_squared_error
+from sklearn.metrics import mean_squared_error, roc_curve, auc
 from sklearn.preprocessing import MinMaxScaler
 import warnings
 import pycountry
@@ -28,6 +28,25 @@ except ImportError:
     TENSORFLOW_AVAILABLE = False
 
 warnings.filterwarnings("ignore")
+
+
+def _binarize_sentiment_labels(series):
+    """
+    Convert continuous sentiment scores into binary labels for ROC/AUC analysis.
+    
+    Tries a couple of thresholds to guarantee both classes exist. Returns both the
+    binary label series (same index as input) and metadata describing the strategy.
+    """
+    strategies = [
+        ("median", float(series.median())),
+        ("mean", float(series.mean())),
+        ("zero", 0.0),
+    ]
+    for strategy, threshold in strategies:
+        binary = (series >= threshold).astype(int)
+        if binary.nunique() > 1:
+            return binary, {"strategy": strategy, "value": threshold}
+    return None, None
 
 
 # ===============================
@@ -488,23 +507,32 @@ def evaluate_models(train, test, include_rnn=True, seq_length=30, rnn_epochs=30,
         tuple: (results dictionary with model names and RMSEs, best model name)
     """
     results = {}
+    model_predictions = {}
     
     # Traditional Models
     # AR(1) Model
     ar = ARIMA(train, order=(1, 0, 0)).fit()
-    results["AR(1)"] = np.sqrt(mean_squared_error(test, ar.forecast(len(test))))
+    ar_pred = pd.Series(ar.forecast(len(test)), index=test.index)
+    results["AR(1)"] = np.sqrt(mean_squared_error(test, ar_pred))
+    model_predictions["AR(1)"] = ar_pred
     
     # MA(1) Model
     ma = ARIMA(train, order=(0, 0, 1)).fit()
-    results["MA(1)"] = np.sqrt(mean_squared_error(test, ma.forecast(len(test))))
+    ma_pred = pd.Series(ma.forecast(len(test)), index=test.index)
+    results["MA(1)"] = np.sqrt(mean_squared_error(test, ma_pred))
+    model_predictions["MA(1)"] = ma_pred
     
     # ARIMA(1,0,1) Model
     arima = ARIMA(train, order=(1, 0, 1)).fit()
-    results["ARIMA(1,0,1)"] = np.sqrt(mean_squared_error(test, arima.forecast(len(test))))
+    arima_pred = pd.Series(arima.forecast(len(test)), index=test.index)
+    results["ARIMA(1,0,1)"] = np.sqrt(mean_squared_error(test, arima_pred))
+    model_predictions["ARIMA(1,0,1)"] = arima_pred
     
     # SARIMA(1,0,1)(0,1,1,7) Model
     sarima = SARIMAX(train, order=(1, 0, 1), seasonal_order=(0, 1, 1, 7)).fit(disp=False)
-    results["SARIMA(1,0,1)(0,1,1,7)"] = np.sqrt(mean_squared_error(test, sarima.forecast(len(test))))
+    sarima_pred = pd.Series(sarima.forecast(len(test)), index=test.index)
+    results["SARIMA(1,0,1)(0,1,1,7)"] = np.sqrt(mean_squared_error(test, sarima_pred))
+    model_predictions["SARIMA(1,0,1)(0,1,1,7)"] = sarima_pred
     
     # RNN Models (if TensorFlow is available and requested)
     if include_rnn and TENSORFLOW_AVAILABLE and len(train) > seq_length and len(test) > seq_length:
@@ -513,6 +541,64 @@ def evaluate_models(train, test, include_rnn=True, seq_length=30, rnn_epochs=30,
             # If saved models exist, use them for evaluation (FAST)
             # Otherwise, train new models (SLOW)
             
+<<<<<<< HEAD
+            # LSTM Model
+            lstm_pred, lstm_rmse, lstm_model = train_lstm_model(
+                X_train_rnn, y_train_rnn, X_test_rnn, y_test_rnn, 
+                scaler_rnn, seq_length=seq_length, epochs=rnn_epochs, verbose=0
+            )
+            if lstm_rmse is not None:
+                # Calculate RMSE on original scale
+                test_aligned = test.iloc[seq_length:]
+                lstm_rmse_original = np.sqrt(mean_squared_error(test_aligned, lstm_pred))
+                results["LSTM"] = lstm_rmse_original
+                model_predictions["LSTM"] = pd.Series(lstm_pred, index=test_aligned.index)
+                # Save ALL models (not just best)
+                if country and lstm_model:
+                    save_rnn_model(lstm_model, scaler_rnn, country, "lstm", seq_length)
+            
+            # GRU Model
+            gru_pred, gru_rmse, gru_model = train_gru_model(
+                X_train_rnn, y_train_rnn, X_test_rnn, y_test_rnn,
+                scaler_rnn, seq_length=seq_length, epochs=rnn_epochs, verbose=0
+            )
+            if gru_rmse is not None:
+                test_aligned = test.iloc[seq_length:]
+                gru_rmse_original = np.sqrt(mean_squared_error(test_aligned, gru_pred))
+                results["GRU"] = gru_rmse_original
+                model_predictions["GRU"] = pd.Series(gru_pred, index=test_aligned.index)
+                # Save ALL models
+                if country and gru_model:
+                    save_rnn_model(gru_model, scaler_rnn, country, "gru", seq_length)
+            
+            # Bidirectional LSTM Model
+            bilstm_pred, bilstm_rmse, bilstm_model = train_bilstm_model(
+                X_train_rnn, y_train_rnn, X_test_rnn, y_test_rnn,
+                scaler_rnn, seq_length=seq_length, epochs=rnn_epochs, verbose=0
+            )
+            if bilstm_rmse is not None:
+                test_aligned = test.iloc[seq_length:]
+                bilstm_rmse_original = np.sqrt(mean_squared_error(test_aligned, bilstm_pred))
+                results["Bidirectional LSTM"] = bilstm_rmse_original
+                model_predictions["Bidirectional LSTM"] = pd.Series(bilstm_pred, index=test_aligned.index)
+                # Save ALL models
+                if country and bilstm_model:
+                    save_rnn_model(bilstm_model, scaler_rnn, country, "bilstm", seq_length)
+            
+            # Stacked LSTM Model
+            stacked_pred, stacked_rmse, stacked_model = train_stacked_lstm_model(
+                X_train_rnn, y_train_rnn, X_test_rnn, y_test_rnn,
+                scaler_rnn, seq_length=seq_length, epochs=rnn_epochs, verbose=0
+            )
+            if stacked_rmse is not None:
+                test_aligned = test.iloc[seq_length:]
+                stacked_rmse_original = np.sqrt(mean_squared_error(test_aligned, stacked_pred))
+                results["Stacked LSTM"] = stacked_rmse_original
+                model_predictions["Stacked LSTM"] = pd.Series(stacked_pred, index=test_aligned.index)
+                # Save ALL models
+                if country and stacked_model:
+                    save_rnn_model(stacked_model, scaler_rnn, country, "stacked_lstm", seq_length)
+=======
             rnn_models_to_evaluate = [
                 ("lstm", "LSTM"),
                 ("gru", "GRU"),
@@ -570,13 +656,33 @@ def evaluate_models(train, test, include_rnn=True, seq_length=30, rnn_epochs=30,
                     # Save newly trained model (if country provided)
                     if country and trained_model:
                         save_rnn_model(trained_model, scaler_rnn, country, model_type, seq_length)
+>>>>>>> da4ab0c947d01504f8bf423aa397509cb153d5f1
                 
         except Exception as e:
             # If RNN training fails, continue without RNN models
             pass
     
+    roc_metadata = {"curves": {}, "threshold_info": None}
+    binary_labels, threshold_info = _binarize_sentiment_labels(test)
+    if binary_labels is not None:
+        roc_metadata["threshold_info"] = threshold_info
+        for model_name, preds in model_predictions.items():
+            aligned_labels = binary_labels.reindex(preds.index)
+            aligned_preds = preds.reindex(aligned_labels.index)
+            valid = (~aligned_labels.isna()) & (~aligned_preds.isna())
+            aligned_labels = aligned_labels[valid]
+            aligned_preds = aligned_preds[valid]
+            if aligned_labels.nunique() < 2 or aligned_labels.empty:
+                continue
+            fpr, tpr, _ = roc_curve(aligned_labels.values, aligned_preds.values)
+            roc_metadata["curves"][model_name] = {
+                "fpr": fpr.tolist(),
+                "tpr": tpr.tolist(),
+                "auc": float(auc(fpr, tpr))
+            }
+    
     best_model = min(results, key=results.get)
-    return results, best_model
+    return results, best_model, roc_metadata
 
 
 def forecast_with_rnn(df, model_type="lstm", seq_length=30, steps=90, epochs=20, country=None):
